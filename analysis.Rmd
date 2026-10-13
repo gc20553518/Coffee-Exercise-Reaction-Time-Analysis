@@ -1,0 +1,202 @@
+---
+title: "Stats 101B Final Project Code"
+author: "Group 20 (Jonathan Yu, Kyle Thai, Siddharth Chittapuram, Yichen Xuan, Guo Chu, Ace Zhang)"
+date: "June 7, 2026"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+$$t = \frac{1000 \text{ ms}}{1 \text{ s}} * \sqrt{\frac{\frac{2(\text{d cm)}}{100 \text{ cm/m}}} {9.8 \text{ m/s}^{2}}}$$
+
+$$\frac{\text{reaction\_time\_after} - \text{reaction\_time\_before}}{\text{reaction\_time\_before}} * 100$$
+# Our Data
+
+The source CSV is not included in this public repository. Place an authorized copy of `stats101b_experiment.csv` in the same folder as this file before knitting.
+
+```{r}
+dataset <- read.csv("stats101b_experiment.csv")
+```
+
+# To ensure n = 72, 9 subjects in each of 8 Sex/Caffeine/Exercise groups
+```{r}
+# Stats 101B
+set.seed(101)
+
+# So that we reduce from 96 to 72
+trimmed_data <- c()
+for (s in c("Female", "Male")) {
+  for (caffeine_level in c("coffee", "decaf")) {
+    for (exercise_level in c("jumping_30s", "rest")) {
+      rows <- which(dataset$sex == s & 
+                    dataset$caffeine_group == caffeine_level &
+                    dataset$exercise_group == exercise_level)
+      # Append in groups of 9
+      trimmed_data <- c(trimmed_data, sample(rows, 9))
+    }
+  }
+}
+
+# Include all columns of attributes
+dataset_final <- dataset[sort(trimmed_data), ]
+dim(dataset_final)
+```
+
+```{r}
+# -1 is a low level of the factor, +1 is a high level
+# Easier to vectorize
+
+# 250 mL Regular Coffee vs. Decaf
+A <- ifelse(dataset_final$caffeine_group == "coffee", 1, -1)  
+
+# Jumping for 30 seconds vs. Resting
+B <- ifelse(dataset_final$exercise_group == "jumping_30s", 1, -1) 
+
+# Sex block
+blocking <- ifelse(dataset_final$sex == "Male", 1, -1)  
+
+# Percent change in reaction time, in our dataset it was in proportion form
+response <- dataset_final$proportional_change_reaction_time * 100
+
+# So we can map -1 to Decaf/Rest and +1 to Coffee/Jumping 30 seconds
+caffeine <- factor(A, levels = c(-1, 1), labels = c("Decaf", "Coffee"))
+exercise <- factor(B, levels = c(-1, 1), labels = c("Rest",  "Jump 30 seconds"))
+
+# 9 subjects per Sex x Caffeine x Exercise combination
+table(dataset_final$sex, dataset_final$caffeine_group, dataset_final$exercise_group)
+```
+
+# Mean % Change per Treatment Group
+```{r}
+# Cell means of percent change in reaction time
+cell_means <- c(
+  "Decaf, Rest"  = mean(response[A == -1 & B == -1]),
+  "Coffee, Rest" = mean(response[A ==  1 & B == -1]),
+  "Decaf, Jump"  = mean(response[A == -1 & B ==  1]),
+  "Coffee, Jump" = mean(response[A ==  1 & B ==  1])
+)
+ round(cell_means, 3)
+```
+
+# Why n = 72 using pwr.anova.test
+```{r}
+library(pwr)
+
+# n = 19 with ceiling
+pwr.anova.test(k = 4, f = 0.40, sig.level = 0.05, power = 0.80)
+
+# n = 18 exactly, power rounded to nearest tenth is 0.8 
+pwr.anova.test(k = 4, n = 18, f = 0.40, sig.level = 0.05)
+```
+
+# ANOVA Table
+```{r}
+library(phia)
+
+# Block ANOVA
+model_with_block <- aov(response ~ factor(A) * factor(B) + factor(blocking))
+summary(model_with_block)
+model_with_block # why we got a Sum of Squares of 1
+
+# Puts blocks into levels, so not using this interaction plot in the report 
+plot(interactionMeans(model_with_block))
+```
+
+```{r}
+# Without block ANOVA
+model_without_block <- aov(response ~ factor(A) * factor(B))
+summary(model_without_block)
+```
+
+# Fitted Model
+
+```{r}
+regression_model <- lm(response ~ A * B + blocking)
+summary(regression_model)
+```
+
+# Effect Sizes
+```{r}
+# Should be 2 * regression coefficients
+effects <- na.omit(2 * coef(regression_model))[-1] # Exclude intercept
+round(effects, 3)
+```
+
+# Interaction Plot
+```{r}
+# We want lines to show change from -1 to +1 level and points for endpoints, so type = "b"
+# Instead of numbers, use circle and square for endpoints
+
+interaction.plot(exercise, caffeine, response,
+                 main = "Interaction Plot of Caffeine Level and Exercise Level",
+                 xlab = "Exercise Level",
+                 ylab = "Mean Percent Change in Reaction Time",
+                 trace.label = "Caffeine Level",
+                 col = c("blue", "red"), lwd = 2, type = "b", pch = c(16, 15),
+                 ylim = c(-15, 5))
+```
+
+# Main Effect Plots
+```{r}
+par(mfrow = c(1, 2))
+
+# Main effect for both factors is an average
+caffeine_means <- c(mean(response[A == -1]), 
+                    mean(response[A == 1]))
+
+# par() function allows x-axis to only include the levels
+plot(x = c(1.1, 2.1), y = caffeine_means, type = "b", pch = 15,
+     main = "Caffeine Main Effect Plot", ylim = c(-15, 5),
+     xlab = "Caffeine Level", xlim = c(1, 2.3),
+     ylab = "Mean % Change in Reaction Time",
+     col = "brown", xaxt = "n", lwd = 4)
+
+# Keep tick marks to show low and high level endpoints
+axis(side = 1, at = c(1.1, 2.1),
+     labels = c("Decaf (-1)", "Regular Coffee (+1)"))
+
+exercise_means <- c(mean(response[B == -1]), 
+                    mean(response[B == 1]))
+
+plot(x = c(1.1, 2.1), y = exercise_means, type = "b", pch = 15, 
+     main = "Exercise Main Effect Plot", ylim = c(-15, 5),
+     xlab = "Exercise Level", xlim = c(1, 2.3), ylab = "Mean % Change in Reaction Time",
+     col = "turquoise", xaxt = "n", lwd = 4)
+axis(side = 1, at = c(1.1, 2.1), 
+     labels = c("Rest (-1)", "Jump 30 seconds (+1)"))
+```
+
+# Side-by-Side Boxplot
+```{r}
+boxplot(response ~ caffeine + exercise,
+        names = c("Decaf + Rest", "Coffee + Rest", "Decaf + Jump", "Coffee + Jump"),
+        xlab = "Treatment Combination",
+        ylab = "Percent Change in Reaction Time",
+        main = "Side-by-Side Boxplots of Percent Change in Reaction Time",
+        col  = c("red", "red", "green", "green")) # Red = rest, Green = jumping
+
+# Treatment Means referenced around 0
+abline(lty = 2, h = 0)
+```
+
+# Residual and Normal Q-Q plots
+```{r}
+par(mfrow = c(1, 2))
+
+# Residuals vs fitted: checks constant variance
+# Open circles for Residual and Q-Q plots
+plot(regression_model$fitted.values, regression_model$residuals,
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residuals vs Fitted")
+
+# Need dashed horizontal line because we are using 0 as a reference residual
+abline(lty = 2, h = 0)
+
+# Normal Q-Q plot with a fitted line to identify any outliers
+qqnorm(regression_model$residuals)
+qqline(regression_model$residuals)
+```
